@@ -1,0 +1,61 @@
+---
+title: "LDAProjectVaxPolAnx"
+output: html_document
+date: "2025-05-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+w1 <- read_tsv(here("covid-19_wave1_survey_cls.tab"), na = c("-1","-8","-9"))
+w2 <- read_tsv(here("covid-19_wave2_survey_cls.tab"), na = c("-1","-8","-9"))
+w3 <- read_tsv(here("covid-19_wave3_survey_cls.tab"), na = c("-1","-8","-9"))
+print(w1)
+
+
+```
+```{r}
+# 5.1  pick ID, weights and core vars
+keys   <- c("NCDSID", "CW2_WEIGHT_A", "CW3_WEIGHT_A")   # adjust to exact names after a quick glimpse with names()
+trust  <- w2 %>% select(NCDSID, trust_polp = TRUSTPOLP)        # predictor
+gad2   <- w3 %>% transmute(ID,
+           gad2_1 = CW3_GAD2PHQ2_1,
+           gad2_2 = CW3_GAD2PHQ2_2,
+           gad2   = gad2_1 + gad2_2)                       # mediator
+vac    <- w3 %>% select(ID, been_vacc = BEENVAC)           # outcome
+
+# 5.2  merge waves (inner join keeps only cases measured in both)
+dat <- trust %>%
+       inner_join(gad2, by = "NCDSID") %>%
+       inner_join(vac,  by = "NCDSID") %>%
+       inner_join(w3 %>% select(NCDSID, weight = CW3_WEIGHT_A), by = "NCDSID")   # add weights
+
+# 5.3  recode outcome to binary uptake (1 = vaccinated; 0 = not yet / no intent)
+dat <- dat %>% mutate(vaccinated = ifelse(been_vacc == 1, 1, 0))
+
+# 5.4  quick sanity check
+janitor::tabyl(dat$vaccinated)
+
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
