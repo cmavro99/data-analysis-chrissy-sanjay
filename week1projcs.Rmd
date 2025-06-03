@@ -1,0 +1,145 @@
+---
+title: "LDAProjectVaxPolAnx"
+output: html_document
+date: "2025-05-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+w1 <- read_tsv(here("covid-19_wave1_survey_cls.tab"), na = c("-1","-8","-9"))
+w2 <- read_tsv(here("covid-19_wave2_survey_cls.tab"), na = c("-1","-8","-9"))
+w3 <- read_tsv(here("covid-19_wave3_survey_cls.tab"), na = c("-1","-8","-9"))
+print(w1)
+
+
+```
+
+```{r step 1 fix ID's}
+
+build_pid <- function(df, wave) {
+
+  cohort_var <- paste0("CW", wave, "_COHORT")    # 1 = NCDS … 6 = NSHD
+
+  #----- 1. row-wise “first non-missing” base id -----------------------------
+  id_cols_ordered <- c("NCDSID", "BCSID", "NSID", "MCSID", "NSHDID", "ID")
+  present <- id_cols_ordered[id_cols_ordered %in% names(df)]
+
+  df <- df %>%
+    mutate(across(all_of(present), ~ na_if(trimws(.x), ""))) %>%     # "" → NA
+    mutate(base = coalesce(!!!syms(present)))                        # row-wise
+
+  #----- 2. pull person-within-family keys for MCS ---------------------------
+  cnum <- grep("CNUM00$", names(df), value = TRUE) |> first()
+  pnum <- grep("PNUM00$", names(df), value = TRUE) |> first()
+
+  #----- 3. paste pieces; fall back to row number if still NA ----------------
+  df <- df %>%
+    mutate(
+      base = if_else(is.na(base),
+                     paste0("UNK", row_number()),  # unique fallback
+                     as.character(base)),
+      pid  = case_when(
+        .data[[cohort_var]] == 4 ~ paste0(base, "_", sprintf("%03d",
+                                   coalesce(.data[[cnum]], 999))),
+        .data[[cohort_var]] == 5 ~ paste0(base, "_", sprintf("%03d",
+                                   coalesce(.data[[pnum]], 999))),
+        TRUE                     ~ base
+      ),
+      cohort = .data[[cohort_var]]
+    ) %>%
+    mutate(pid = make.unique(pid, sep = "_dup"))
+  
+  df
+}
+
+w1 <- build_pid(w1, 1)
+w2 <- build_pid(w2, 2)
+w3 <- build_pid(w3, 3)
+
+stopifnot(!anyDuplicated(w1$pid),
+          !anyDuplicated(w2$pid),
+          !anyDuplicated(w3$pid))
+
+```
+```{r}
+
+```
+
+
+
+```{r 02-harmonise-and-merge, message = FALSE}
+
+w1s <- w1 %>%                                    # <- already has pid/cohort
+  select(pid, cohort,
+         trust_w1 = CW1_TRUSTPOLP,
+         g1_w1    = CW1_GAD2PHQ2_1,
+         g2_w1    = CW1_GAD2PHQ2_2,
+         wt_w1    = CW1_COMBWT)
+
+w2s <- w2 %>%
+  select(pid, cohort,
+         trust_w2 = CW2_TRUSTPOLP,
+         g1_w2    = CW2_GAD2PHQ2_1,
+         g2_w2    = CW2_GAD2PHQ2_2,
+         wt_w2    = CW2_COMBWT)
+
+w3s <- w3 %>%
+  select(pid, cohort,
+         trust_w3 = CW3_TRUSTPOLP,
+         g1_w3    = CW3_GAD2PHQ2_1,
+         g2_w3    = CW3_GAD2PHQ2_2,
+         vac_w3   = CW3_COVIDVAC,
+         wt_w3    = CW3_COMBWT)
+wide <- reduce(list(w1s, w2s, w3s), full_join, by = c("pid", "cohort"))
+
+neg_codes <- c(-1, -8, -9)     # CLS missing conventions
+
+wide <- wide %>%
+  # turn all -1/-8/-9 in the GAD items into NA
+  mutate(across(starts_with("g"),        # g1_w1, g2_w1, g1_w2, …
+                ~ replace(.x, .x %in% neg_codes, NA_real_))) %>%
+
+  # GAD-2 totals (sum of the two 0–3 items; NA if either item missing)
+  mutate(gad2_w1 = g1_w1 + g2_w1,
+         gad2_w2 = g1_w2 + g2_w2,
+         gad2_w3 = g1_w3 + g2_w3) %>%
+
+  # recode CW3_COVIDVAC  (1=Very likely … 4=Very unlikely → binary 1/0)
+  mutate(vacc_like = case_when(
+           vac_w3 %in% 1:2 ~ 1,           # likely
+           vac_w3 %in% 3:4 ~ 0,           # unlikely
+           TRUE            ~ NA_real_
+         ))
+skimr::skim(select(wide, starts_with("trust_"), starts_with("gad2_"),
+                   vacc_like))
+```
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
