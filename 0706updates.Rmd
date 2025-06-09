@@ -23,7 +23,7 @@ build_pid <- function(df, wave) {
 
   cohort_var <- paste0("CW", wave, "_COHORT")    # 1 = NCDS … 6 = NSHD
 
-  #----- 1. row-wise “first non-missing” base id -----------------------------
+  # 1. row-wise  base id
   id_cols_ordered <- c("NCDSID", "BCSID", "NSID", "MCSID", "NSHDID", "ID")
   present <- id_cols_ordered[id_cols_ordered %in% names(df)]
 
@@ -31,11 +31,11 @@ build_pid <- function(df, wave) {
     mutate(across(all_of(present), ~ na_if(trimws(.x), ""))) %>%     # "" → NA
     mutate(base = coalesce(!!!syms(present)))                        # row-wise
 
-  #----- 2. pull person-within-family keys for MCS ---------------------------
+  # 2. pull person-within-family keys for MCS -
   cnum <- grep("CNUM00$", names(df), value = TRUE) |> first()
   pnum <- grep("PNUM00$", names(df), value = TRUE) |> first()
 
-  #----- 3. paste pieces; fall back to row number if still NA ----------------
+  #3. paste pieces; fall back to row number if still NA
   df <- df %>%
     mutate(
       base = if_else(is.na(base),
@@ -70,7 +70,7 @@ stopifnot(!anyDuplicated(w1$pid),
 
 ```{r 02-harmonise-and-merge, message = FALSE}
 
-w1s <- w1 %>%                                    # <- already has pid/cohort
+w1s <- w1 %>%                                    #  already has pid/cohort
   select(pid, cohort,
          trust_w1 = CW1_TRUSTPOLP,
          g1_w1    = CW1_GAD2PHQ2_1,
@@ -93,14 +93,14 @@ w3s <- w3 %>%
          wt_w3    = CW3_COMBWT)
 wide <- reduce(list(w1s, w2s, w3s), full_join, by = c("pid", "cohort"))
 
-neg_codes <- c(-1, -8, -9)     # CLS missing conventions
+neg_codes <- c(-1, -8, -9)     # CLS missing 
 
 wide <- wide %>%
   # turn all -1/-8/-9 in the GAD items into NA
   mutate(across(starts_with("g"),        # g1_w1, g2_w1, g1_w2, …
                 ~ replace(.x, .x %in% neg_codes, NA_real_))) %>%
 
-  # GAD-2 totals (sum of the two 0–3 items; NA if either item missing)
+  # GAD-2 totals (sum of the two 0–3 items NA if either item missing)
   mutate(gad2_w1 = g1_w1 + g2_w1,
          gad2_w2 = g1_w2 + g2_w2,
          gad2_w3 = g1_w3 + g2_w3) %>%
@@ -127,7 +127,7 @@ imp_vars <- base %>%
          vacc_like, wt_w3,
          any_of(aux))
 pred <- make.predictorMatrix(imp_vars)
-pred["wt_w3", ] <- 0          # weight should *predict* nothing; never be imputed
+pred["wt_w3", ] <- 0          # weight should predict nothing never be imputed
 pred[, "wt_w3"] <- 0
 imp <- mice(imp_vars,
             m      = 20,
@@ -144,8 +144,8 @@ saveRDS(imp, here::here("data/derived/imp20_mids.rds"))
 imp <- readRDS(here::here("data/derived/imp20_mids.rds"))
 centre_this <- c("trust_w1","trust_w2","trust_w3",
                  "gad2_w1", "gad2_w2", "gad2_w3")
-imp <- complete(imp, "long", include = TRUE) %>%      # long stack of 20× data
-  group_by(.imp) %>%                                  # centre *within* each set
+imp <- complete(imp, "long", include = TRUE) %>%      
+  group_by(.imp) %>%                                  # centre within each set
   mutate(across(all_of(centre_this),
                 ~ .x - mean(.x, na.rm = TRUE),
                 .names = "{.col}_c")) %>%
@@ -156,11 +156,11 @@ saveRDS(imp, here::here("data/derived/imp20_centered.rds"))
 
 
 ```{r 04-re-scale, message=FALSE}
-library(mice)       # mids objects
+library(mice)      
 library(dplyr)
-library(miceadds)   # helper to go long ↔ mids
+library(miceadds)   
 
-# 1. load the *original* imputation you saved after step 03
+# 1. load the original imputation  saved after step 03
 imp_raw <- readRDS(here::here("data/derived/imp20_mids.rds"))
 
 # 2. pick variables to centre
@@ -180,7 +180,7 @@ imp_c <- miceadds::datlist2mids(
            split(imp_long, imp_long$.imp)           # list of 21 data frames
          )
 
-# 5. save for modelling
+# 5. saved for modelling
 saveRDS(imp_c, here::here("data/derived/imp20_centered.rds"))
 ```
 ```{r}
@@ -209,7 +209,7 @@ model <- '
   # total indirect
   total_ind := ind_early + ind_late
 '
-
+#fits code not working need to check code/package update online
 fits <- lavaan.mi(model             = model,
                   data              = imp,
                   estimator         = "WLSMV",
