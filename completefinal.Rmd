@@ -3,8 +3,8 @@ title: "Does generalised anxiety (measured with the GAD-2) mediate the associati
   between trust that UK governments act above party-political interest and subsequent
   COVID-19 vaccine uptake (or stated intention) in the CLS COVID-19 surveys?"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 date: "2025-05-27"
 ---
 
@@ -26,20 +26,17 @@ library("mice")
 
 ```
 
-
-
-```{r}
+```{r message=FALSE, warning=FALSE}
 # read wave data files, treating CLS negative codes as NA
 # these raw datasets will later be merged on participant ID
 w1 <- read_tsv(here("covid-19_wave1_survey_cls.tab"), na = c("-1","-8","-9"))
 w2 <- read_tsv(here("covid-19_wave2_survey_cls.tab"), na = c("-1","-8","-9"))
 w3 <- read_tsv(here("covid-19_wave3_survey_cls.tab"), na = c("-1","-8","-9"))
-print(w1)
-print(w2)
+
 
 ```
 
-```{r step 1 fix IDs}
+```{r step 1 fix IDs, echo=TRUE}
 # create unique participant IDs across waves for reliable merging
 # combines cohort-specific identifiers and checks for duplicates
 
@@ -89,7 +86,7 @@ stopifnot(!anyDuplicated(w1$pid),
 
 ```
 
-```{r 02-harmonise-and-merge, message = FALSE}
+```{r 02-harmonise-and-merge, echo=TRUE, message=FALSE}
 # select comparable items from each wave and merge to wide format
 # convert negative codes to NA, compute GAD-2 totals, recode
 # vaccine intention as binary, and keep participants with weights
@@ -363,6 +360,3 @@ print(fitMeasures(fits, c("chisq","df","cfi","rmsea","srmr")))
 
 
 ```
-
-
-
