@@ -13,6 +13,7 @@ library("tidyverse")
 library("lavaan")
 library("dplyr")
 library("mice")
+library(semPlot)
 ```
 
 ```{r}
@@ -125,6 +126,22 @@ base <- wide %>%          # “wide” is your merged data
          !is.na(wt_w3))          # have a valid weight   <-- NEW
 ```
 
+```{r trust-gad-distributions, fig.height=4, fig.width=6}
+wide %>%
+  select(pid, starts_with("trust_")) %>%
+  pivot_longer(-pid, names_to = "wave", values_to = "trust") %>%
+  ggplot(aes(trust, fill = wave, colour = wave)) +
+  geom_histogram(position = "identity", bins = 30, alpha = 0.4) +
+  theme_minimal()
+
+wide %>%
+  select(pid, starts_with("gad2_")) %>%
+  pivot_longer(-pid, names_to = "wave", values_to = "gad2") %>%
+  ggplot(aes(gad2, fill = wave, colour = wave)) +
+  geom_histogram(position = "identity", bins = 30, alpha = 0.4) +
+  theme_minimal()
+```
+
 
 
 ```{r 03-impute, message=FALSE}
@@ -136,6 +153,17 @@ summary(select(base,
                starts_with("trust_"),
                starts_with("gad2_"),
                vacc_like, wt_w3))
+
+## Visualise missing-data patterns
+mice::md.pattern(select(base,
+                        trust_w1, trust_w2, trust_w3,
+                        gad2_w1,  gad2_w2,  gad2_w3,
+                        vacc_like, wt_w3))
+VIM::aggr(select(base,
+                 trust_w1, trust_w2, trust_w3,
+                 gad2_w1, gad2_w2, gad2_w3,
+                 vacc_like, wt_w3),
+          numbers = TRUE)
 
 # indicator variables for missingness (1 = missing, 0 = observed)
 miss_ind <- base %>%
@@ -172,6 +200,9 @@ imp <- mice(imp_vars,
             method = "pmm",           # defaults: pmm for numeric, logreg/polyreg for factors
             predictorMatrix = pred)
 stripplot(imp, trust_w1 ~ .imp)
+stripplot(imp, gad2_w1 ~ .imp)
+mice::densityplot(imp, ~ trust_w2)
+mice::densityplot(imp, ~ gad2_w1)
 fs::dir_create(here::here("data", "derived"))
 saveRDS(imp, here::here("data/derived/imp20_mids.rds"))
 
@@ -239,6 +270,18 @@ df1   <- complete(imp_c, 1)
 names(df1)
 ```
 
+```{r centred-hists, fig.height=4, fig.width=6}
+df1 %>%
+  select(ends_with("_c")) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(value)) +
+  geom_histogram(bins = 30, fill = "skyblue", colour = "white") +
+  facet_wrap(~variable, scales = "free") +
+  theme_minimal()
+
+cor(select(df1, ends_with("_c")))
+```
+
 ```{r 05-sem-lavaan, message=FALSE}
 library(lavaan)      # SEM engine
 library(lavaan.mi)   # pooled SEM across multiple imputations
@@ -291,6 +334,7 @@ summary(fits, ci = TRUE)          # pooled estimates + 95 % CIs
 # ── 5  Global fit indices (always available) ───────────────────────────────
 cat("\n*** GLOBAL FIT ***\n")
 print(fitMeasures(fits, c("chisq", "df", "cfi", "rmsea", "srmr")))
+semPlot::semPaths(fits, what = "std", layout = "tree")
 
 ```
 ```{r 06-sem-residcov, message=FALSE}
@@ -317,7 +361,8 @@ fit_quick <- lavaan.mi(model_quick, data = imp_c,
 
 fitMeasures(fit_quick, c("cfi","rmsea","srmr"))
 summary(fit_quick, ci = TRUE)
-# do trust on trust and anx on anx , take out cohort multigroup later 
+semPlot::semPaths(fit_quick, what = "std", layout = "tree")
+# do trust on trust and anx on anx , take out cohort multigroup later
 ```
 
 
