@@ -1,0 +1,316 @@
+---
+title: "Does generalised anxiety (measured with the GAD-2) mediate the association between trust that UK governments act above party-political interest and subsequent COVID-19 vaccine uptake (or stated intention) in the CLS COVID-19 surveys?"
+output: html_document
+date: "2025-05-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r load packagaes}
+library("here")
+library("tidyverse")
+library("lavaan")
+library("dplyr")
+library("mice")
+```
+
+```{r}
+w1 <- read_tsv(here("covid-19_wave1_survey_cls.tab"), na = c("-1","-8","-9"))
+w2 <- read_tsv(here("covid-19_wave2_survey_cls.tab"), na = c("-1","-8","-9"))
+w3 <- read_tsv(here("covid-19_wave3_survey_cls.tab"), na = c("-1","-8","-9"))
+print(w1)
+print(w2)
+
+```
+
+```{r step 1 fix ID's}
+
+build_pid <- function(df, wave) {
+
+  cohort_var <- paste0("CW", wave, "_COHORT")    # 1 = NCDS … 6 = NSHD
+
+  # 1. row-wise  base id
+  id_cols_ordered <- c("NCDSID", "BCSID", "NSID", "MCSID", "NSHDID", "ID")
+  present <- id_cols_ordered[id_cols_ordered %in% names(df)]
+
+  df <- df %>%
+    mutate(across(all_of(present), ~ na_if(trimws(.x), ""))) %>%     # "" → NA
+    mutate(base = coalesce(!!!syms(present)))                        # row-wise
+
+  # 2. pull person-within-family keys for MCS -
+  cnum <- grep("CNUM00$", names(df), value = TRUE) |> first()
+  pnum <- grep("PNUM00$", names(df), value = TRUE) |> first()
+
+  #3. paste pieces; fall back to row number if still NA
+  df <- df %>%
+    mutate(
+      base = if_else(is.na(base),
+                     paste0("UNK", row_number()),  # unique fallback
+                     as.character(base)),
+      pid  = case_when(
+        .data[[cohort_var]] == 4 ~ paste0(base, "_", sprintf("%03d",
+                                   coalesce(.data[[cnum]], 999))),
+        .data[[cohort_var]] == 5 ~ paste0(base, "_", sprintf("%03d",
+                                   coalesce(.data[[pnum]], 999))),
+        TRUE                     ~ base
+      ),
+      cohort = .data[[cohort_var]]
+    ) %>%
+    mutate(pid = make.unique(pid, sep = "_dup"))
+  
+  df
+}
+
+w1 <- build_pid(w1, 1)
+w2 <- build_pid(w2, 2)
+w3 <- build_pid(w3, 3)
+
+stopifnot(!anyDuplicated(w1$pid),
+          !anyDuplicated(w2$pid),
+          !anyDuplicated(w3$pid))
+
+```
+
+
+
+
+```{r 02-harmonise-and-merge, message = FALSE}
+
+w1s <- w1 %>%                                    #  already has pid/cohort
+  select(pid, cohort,
+         trust_w1 = CW1_TRUSTPOLP,
+         g1_w1    = CW1_GAD2PHQ2_1,
+         g2_w1    = CW1_GAD2PHQ2_2,
+         wt_w1    = CW1_COMBWT)
+
+w2s <- w2 %>%
+  select(pid, cohort,
+         trust_w2 = CW2_TRUSTPOLP,
+         g1_w2    = CW2_GAD2PHQ2_1,
+         g2_w2    = CW2_GAD2PHQ2_2,
+         wt_w2    = CW2_COMBWT)
+
+w3s <- w3 %>%
+  select(pid, cohort,
+         trust_w3 = CW3_TRUSTPOLP,
+         g1_w3    = CW3_GAD2PHQ2_1,
+         g2_w3    = CW3_GAD2PHQ2_2,
+         vac_w3   = CW3_COVIDVAC,
+         wt_w3    = CW3_COMBWT)
+wide <- reduce(list(w1s, w2s, w3s), full_join, by = c("pid", "cohort"))
+
+neg_codes <- c(-1, -8, -9)     # CLS missing 
+
+wide <- wide %>%
+  # turn all -1/-8/-9 in the GAD items into NA
+  mutate(across(starts_with("g"),        # g1_w1, g2_w1, g1_w2, …
+                ~ replace(.x, .x %in% neg_codes, NA_real_))) %>%
+
+  # GAD-2 totals (sum of the two 0–3 items NA if either item missing)
+  mutate(gad2_w1 = g1_w1 + g2_w1,
+         gad2_w2 = g1_w2 + g2_w2,
+         gad2_w3 = g1_w3 + g2_w3) %>%
+
+  # recode CW3_COVIDVAC  (1=Very likely … 4=Very unlikely → binary 1/0)
+  mutate(vacc_like = case_when(
+           vac_w3 %in% 1:2 ~ 1,           # likely
+           vac_w3 %in% 3:4 ~ 0,           # unlikely
+           TRUE            ~ NA_real_
+         ))
+skimr::skim(select(wide, starts_with("trust_"), starts_with("gad2_"),
+                   vacc_like))
+base <- wide %>%          # “wide” is your merged data
+  filter(!is.na(vacc_like),      # reached Wave 3
+         !is.na(wt_w3))          # have a valid weight   <-- NEW
+```
+
+
+
+```{r 03-impute, message=FALSE}
+base <- wide %>% filter(!is.na(vacc_like))
+aux <- c("CW1_SEX", "CW1_ETHNIC", "CW1_EDU") 
+imp_vars <- base %>%
+  select(cohort,
+         trust_w1, trust_w2, trust_w3,
+         gad2_w1,  gad2_w2,  gad2_w3,
+         vacc_like, wt_w3,
+         any_of(aux))
+pred <- make.predictorMatrix(imp_vars)
+pred["wt_w3", ] <- 0          # weight should predict nothing never be imputed
+pred[, "wt_w3"] <- 0
+imp <- mice(imp_vars,
+            m      = 20,
+            seed   = 2025,
+            method = "pmm",           # defaults: pmm for numeric, logreg/polyreg for factors
+            predictorMatrix = pred)
+stripplot(imp, trust_w1 ~ .imp)
+fs::dir_create(here::here("data", "derived"))
+saveRDS(imp, here::here("data/derived/imp20_mids.rds"))
+#check colinearities / correlations between variables before and after imputation, do checks on range for each variable
+# What is predictive of missingness, create indicator - all before imp , - 0-1 , if else - before testing 
+```
+
+```{r 04-centre-scale, message=FALSE}
+imp <- readRDS(here::here("data/derived/imp20_mids.rds"))
+centre_this <- c("trust_w1","trust_w2","trust_w3",
+                 "gad2_w1", "gad2_w2", "gad2_w3")
+imp <- complete(imp, "long", include = TRUE) %>%      
+  group_by(.imp) %>%                                  # centre within each set
+  mutate(across(all_of(centre_this),
+                ~ .x - mean(.x, na.rm = TRUE),
+                .names = "{.col}_c")) %>%
+  ungroup() %>%
+  as.mids()                                           # convert back to mids
+saveRDS(imp, here::here("data/derived/imp20_centered.rds"))
+```
+
+
+```{r 04-re-scale, message=FALSE}
+<<<<<<< HEAD
+library(mice)      
+library(dplyr)
+library(miceadds)   
+
+# 1. load the original imputation  saved after step 03
+=======
+library(mice); library(dplyr)
+
+>>>>>>> 08213f5 (fixing details 30/06)
+imp_raw <- readRDS(here::here("data/derived/imp20_mids.rds"))
+
+cvars <- c("trust_w1","trust_w2","trust_w3",
+           "gad2_w1","gad2_w2","gad2_w3")
+
+imp_long <- complete(imp_raw, "long", include = TRUE) %>% 
+  group_by(.imp) %>% 
+  mutate(across(all_of(cvars),
+                ~ .x - mean(.x, na.rm = TRUE),
+                .names = "{.col}_c")) %>% 
+  ungroup()
+
+## 🔶 1. drop any columns whose names are "" or NA -----------------------------
+imp_long <- imp_long[ , !(is.na(names(imp_long)) | names(imp_long) == "") ]
+
+## 🔶 2. now convert back to mids ---------------------------------------------
+imp_c <- as.mids(imp_long)
+
+<<<<<<< HEAD
+# 5. saved for modelling
+=======
+>>>>>>> 08213f5 (fixing details 30/06)
+saveRDS(imp_c, here::here("data/derived/imp20_centered.rds"))
+```
+```{r}
+file.remove(here::here("data/derived/imp20_centered.rds"))
+```
+
+
+```{r}
+imp_c  <- readRDS(here::here("data/derived/imp20_centered.rds"))
+any(is.na(names(complete(imp_c, 1))))   # should print FALSE
+df1   <- complete(imp_c, 1)
+names(df1)
+```
+
+```{r 05-sem-lavaan, message=FALSE}
+library(lavaan)      # SEM engine
+library(lavaan.mi)   # pooled SEM across multiple imputations
+
+# Your centred mids object (already in memory as `imp_c`).
+# If you start a fresh session, reload it:
+# imp_c <- readRDS(here::here("data/derived/imp20_centered.rds"))
+
+# ── 2  Model specification ────────────────────────────────────────────────
+model <- '
+  # ­-- lag-1 mediation
+  gad2_w2_c  ~ a1 * trust_w1_c + cohort
+  vacc_like  ~ b1 * gad2_w2_c
+  ind_early  := a1 * b1
+
+  # ­-- lag-2 mediation
+  gad2_w3_c  ~ a2 * trust_w2_c + cohort
+  vacc_like  ~ b2 * gad2_w3_c
+  ind_late   := a2 * b2
+
+  # ­-- direct effects
+  vacc_like  ~ c1 * trust_w1_c
+             + c2 * trust_w2_c
+             +      trust_w3_c
+             +      cohort
+
+  #- total indirect
+  total_ind  := ind_early + ind_late
+'
+<<<<<<< HEAD
+#fits code not working need to check code/package update online
+fits <- lavaan.mi(model             = model,
+                  data              = imp,
+                  estimator         = "WLSMV",
+                  ordered           = "vacc_like",
+                  sampling.weights  = "wt_w3")
+=======
+
+# ── 3  Fit the model across the 20 imputations ─────────────────────────────
+fits <- lavaan.mi(
+  model            = model,
+  data             = imp_c,
+  estimator        = "WLSMV",        # robust for categorical outcome
+  ordered          = "vacc_like",
+  sampling.weights = "wt_w3"
+)
+>>>>>>> 08213f5 (fixing details 30/06)
+
+# ── 4  POOLED raw-scale results ────────────────────────────────────────────
+cat("\n*** POOLED (un-standardised) EFFECTS ***\n")
+summary(fits, ci = TRUE)          # pooled estimates + 95 % CIs
+
+# ── 5  Global fit indices (always available) ───────────────────────────────
+cat("\n*** GLOBAL FIT ***\n")
+print(fitMeasures(fits, c("chisq", "df", "cfi", "rmsea", "srmr")))
+
+```
+```{r 06-sem-residcov, message=FALSE}
+model_quick <- '
+  # structural
+ trust_w2_c  ~  trust_w1_c
+  gad2_w2_c  ~ a1 * trust_w1_c + cohort
+  vacc_like  ~ b1 * gad2_w2_c
+  gad2_w3_c  ~ a2 * trust_w2_c + cohort
+  vacc_like  ~ b2 * gad2_w3_c
+  vacc_like  ~ c1 * trust_w1_c + c2 * trust_w2_c + trust_w3_c + cohort
+  ind_early  := a1 * b1
+  ind_late   := a2 * b2
+  total_ind  := ind_early + ind_late
+'
+
+fit_quick <- lavaan.mi(model_quick, data = imp_c,
+                       estimator = "WLSMV",
+                       ordered   = "vacc_like",
+                       sampling.weights = "wt_w3")
+
+fitMeasures(fit_quick, c("cfi","rmsea","srmr"))
+summary(fit_quick, ci = TRUE)
+# do trust on trust and anx on anx , take out cohort multigroup later 
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
