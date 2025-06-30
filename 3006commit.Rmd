@@ -201,16 +201,11 @@ saveRDS(imp, here::here("data/derived/imp20_centered.rds"))
 
 
 ```{r 04-re-scale, message=FALSE}
-<<<<<<< HEAD
-library(mice)      
+library(mice)
 library(dplyr)
-library(miceadds)   
+library(miceadds)
 
 # 1. load the original imputation  saved after step 03
-=======
-library(mice); library(dplyr)
-
->>>>>>> 08213f5 (fixing details 30/06)
 imp_raw <- readRDS(here::here("data/derived/imp20_mids.rds"))
 
 cvars <- c("trust_w1","trust_w2","trust_w3",
@@ -229,10 +224,7 @@ imp_long <- imp_long[ , !(is.na(names(imp_long)) | names(imp_long) == "") ]
 ## 🔶 2. now convert back to mids ---------------------------------------------
 imp_c <- as.mids(imp_long)
 
-<<<<<<< HEAD
 # 5. saved for modelling
-=======
->>>>>>> 08213f5 (fixing details 30/06)
 saveRDS(imp_c, here::here("data/derived/imp20_centered.rds"))
 ```
 ```{r}
@@ -257,6 +249,12 @@ library(lavaan.mi)   # pooled SEM across multiple imputations
 
 # ── 2  Model specification ────────────────────────────────────────────────
 model <- '
+  # ­-- autoregressive paths
+  trust_w2_c ~ d1 * trust_w1_c
+  trust_w3_c ~ d2 * trust_w2_c
+  gad2_w2_c  ~ d3 * gad2_w1_c
+  gad2_w3_c  ~ d4 * gad2_w2_c
+
   # ­-- lag-1 mediation
   gad2_w2_c  ~ a1 * trust_w1_c + cohort
   vacc_like  ~ b1 * gad2_w2_c
@@ -276,14 +274,6 @@ model <- '
   #- total indirect
   total_ind  := ind_early + ind_late
 '
-<<<<<<< HEAD
-#fits code not working need to check code/package update online
-fits <- lavaan.mi(model             = model,
-                  data              = imp,
-                  estimator         = "WLSMV",
-                  ordered           = "vacc_like",
-                  sampling.weights  = "wt_w3")
-=======
 
 # ── 3  Fit the model across the 20 imputations ─────────────────────────────
 fits <- lavaan.mi(
@@ -293,7 +283,6 @@ fits <- lavaan.mi(
   ordered          = "vacc_like",
   sampling.weights = "wt_w3"
 )
->>>>>>> 08213f5 (fixing details 30/06)
 
 # ── 4  POOLED raw-scale results ────────────────────────────────────────────
 cat("\n*** POOLED (un-standardised) EFFECTS ***\n")
@@ -307,11 +296,14 @@ print(fitMeasures(fits, c("chisq", "df", "cfi", "rmsea", "srmr")))
 ```{r 06-sem-residcov, message=FALSE}
 model_quick <- '
   # structural
- trust_w2_c  ~  trust_w1_c
-  gad2_w2_c  ~ a1 * trust_w1_c + cohort
-  vacc_like  ~ b1 * gad2_w2_c
-  gad2_w3_c  ~ a2 * trust_w2_c + cohort
-  vacc_like  ~ b2 * gad2_w3_c
+ trust_w2_c  ~ d1 * trust_w1_c
+ trust_w3_c  ~ d2 * trust_w2_c
+ gad2_w2_c  ~ d3 * gad2_w1_c
+ gad2_w3_c  ~ d4 * gad2_w2_c
+ gad2_w2_c  ~ a1 * trust_w1_c + cohort
+ vacc_like  ~ b1 * gad2_w2_c
+ gad2_w3_c  ~ a2 * trust_w2_c + cohort
+ vacc_like  ~ b2 * gad2_w3_c
   vacc_like  ~ c1 * trust_w1_c + c2 * trust_w2_c + trust_w3_c + cohort
   ind_early  := a1 * b1
   ind_late   := a2 * b2
