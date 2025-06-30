@@ -129,7 +129,34 @@ base <- wide %>%          # “wide” is your merged data
 
 ```{r 03-impute, message=FALSE}
 base <- wide %>% filter(!is.na(vacc_like))
-aux <- c("CW1_SEX", "CW1_ETHNIC", "CW1_EDU") 
+aux <- c("CW1_SEX", "CW1_ETHNIC", "CW1_EDU")
+
+# --- explore data prior to imputation ---------------------------------------
+summary(select(base,
+               starts_with("trust_"),
+               starts_with("gad2_"),
+               vacc_like, wt_w3))
+
+# indicator variables for missingness (1 = missing, 0 = observed)
+miss_ind <- base %>%
+  mutate(across(c(trust_w1, trust_w2, trust_w3,
+                  gad2_w1,  gad2_w2,  gad2_w3,
+                  vacc_like, wt_w3),
+                ~ if_else(is.na(.x), 1, 0),
+                .names = "{.col}_miss"))
+
+# quick check of which variables might predict missingness
+lapply(names(select(miss_ind, ends_with("_miss"))), function(v) {
+  summary(glm(miss_ind[[v]] ~ trust_w1 + trust_w2 + trust_w3 +
+                            gad2_w1 + gad2_w2 + gad2_w3,
+              data = miss_ind, family = binomial()))
+})
+
+# correlations before imputation
+cor_before <- cor(select(base, starts_with("trust_"), starts_with("gad2_")),
+                  use = "pairwise.complete.obs")
+print(cor_before)
+
 imp_vars <- base %>%
   select(cohort,
          trust_w1, trust_w2, trust_w3,
@@ -147,8 +174,15 @@ imp <- mice(imp_vars,
 stripplot(imp, trust_w1 ~ .imp)
 fs::dir_create(here::here("data", "derived"))
 saveRDS(imp, here::here("data/derived/imp20_mids.rds"))
-#check colinearities / correlations between variables before and after imputation, do checks on range for each variable
-# What is predictive of missingness, create indicator - all before imp , - 0-1 , if else - before testing 
+
+# check range and correlations after imputation using first completed dataset
+imp1 <- complete(imp, 1)
+summary(select(imp1,
+               starts_with("trust_"),
+               starts_with("gad2_"),
+               vacc_like, wt_w3))
+cor_after <- cor(select(imp1, starts_with("trust_"), starts_with("gad2_")))
+print(cor_after)
 ```
 
 ```{r 04-centre-scale, message=FALSE}
