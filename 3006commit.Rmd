@@ -5,9 +5,11 @@ date: "2025-05-27"
 ---
 
 ```{r setup, include=FALSE}
+# set knitr defaults so chunk output is reproducible
 knitr::opts_chunk$set(echo = TRUE)
 ```
 ```{r load packagaes}
+# packages used for file paths, data wrangling, modelling and imputation
 library("here")
 library("tidyverse")
 library("lavaan")
@@ -17,6 +19,8 @@ library(semPlot)
 ```
 
 ```{r}
+# read wave data files, treating CLS negative codes as NA
+# these raw datasets will later be merged on participant ID
 w1 <- read_tsv(here("covid-19_wave1_survey_cls.tab"), na = c("-1","-8","-9"))
 w2 <- read_tsv(here("covid-19_wave2_survey_cls.tab"), na = c("-1","-8","-9"))
 w3 <- read_tsv(here("covid-19_wave3_survey_cls.tab"), na = c("-1","-8","-9"))
@@ -26,6 +30,8 @@ print(w2)
 ```
 
 ```{r step 1 fix ID's}
+# create unique participant IDs across waves for reliable merging
+# combines cohort-specific identifiers and checks for duplicates
 
 build_pid <- function(df, wave) {
 
@@ -77,6 +83,9 @@ stopifnot(!anyDuplicated(w1$pid),
 
 
 ```{r 02-harmonise-and-merge, message = FALSE}
+# select comparable items from each wave and merge to wide format
+# convert negative codes to NA, compute GAD-2 totals, recode
+# vaccine intention as binary, and keep participants with weights
 
 w1s <- w1 %>%                                    #  already has pid/cohort
   select(pid, cohort,
@@ -145,6 +154,9 @@ wide %>%
 
 
 ```{r 03-impute, message=FALSE}
+# inspect missingness and impute 20 datasets using mice
+# create missingness indicators, explore predictors via glm,
+# then save the mids object for later SEM
 base <- wide %>% filter(!is.na(vacc_like))
 aux <- c("CW1_SEX", "CW1_ETHNIC", "CW1_EDU")
 
@@ -217,6 +229,8 @@ print(cor_after)
 ```
 
 ```{r 04-centre-scale, message=FALSE}
+# mean-centre key predictors within each imputed dataset
+# centering aids interpretation of SEM coefficients
 imp <- readRDS(here::here("data/derived/imp20_mids.rds"))
 centre_this <- c("trust_w1","trust_w2","trust_w3",
                  "gad2_w1", "gad2_w2", "gad2_w3")
@@ -232,6 +246,8 @@ saveRDS(imp, here::here("data/derived/imp20_centered.rds"))
 
 
 ```{r 04-re-scale, message=FALSE}
+# recreate centred mids object from saved imputations
+# ensures variables are centred and converted back to mids format
 library(mice)
 library(dplyr)
 library(miceadds)
@@ -259,11 +275,13 @@ imp_c <- as.mids(imp_long)
 saveRDS(imp_c, here::here("data/derived/imp20_centered.rds"))
 ```
 ```{r}
+# remove old file so next step reloads from disk
 file.remove(here::here("data/derived/imp20_centered.rds"))
 ```
 
 
 ```{r}
+# reload centred imputation object and check column names
 imp_c  <- readRDS(here::here("data/derived/imp20_centered.rds"))
 any(is.na(names(complete(imp_c, 1))))   # should print FALSE
 df1   <- complete(imp_c, 1)
@@ -283,6 +301,9 @@ cor(select(df1, ends_with("_c")))
 ```
 
 ```{r 05-sem-lavaan, message=FALSE}
+# specify and fit structural equation model across imputations
+# includes autoregressive, mediation, and direct paths with WLSMV
+# pooled fit indices and parameter estimates are displayed
 library(lavaan)      # SEM engine
 library(lavaan.mi)   # pooled SEM across multiple imputations
 
@@ -338,6 +359,7 @@ semPlot::semPaths(fits, what = "std", layout = "tree")
 
 ```
 ```{r 06-sem-residcov, message=FALSE}
+# simplified SEM used to inspect residual covariances
 model_quick <- '
   # structural
  trust_w2_c  ~ d1 * trust_w1_c
@@ -366,22 +388,17 @@ semPlot::semPaths(fit_quick, what = "std", layout = "tree")
 ```
 
 
+<!--
 ## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Example text and plots removed from final analysis. Retained here as a comment
+for reference on basic R Markdown features.
 
 ```{r cars}
 summary(cars)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
 ```{r pressure, echo=FALSE}
 plot(pressure)
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+-->
